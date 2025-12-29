@@ -12,7 +12,7 @@ load_dotenv()
 
 # Configuration
 MODEL_NAME = "gemini-3-pro-image-preview"
-IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
+IMAGE_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.webp'}
 
 st.set_page_config(page_title="Gemini Photo Restorer", page_icon="📷", layout="wide")
 
@@ -38,6 +38,17 @@ with st.sidebar:
         st.session_state.input_path = input_path_str
         st.rerun()
 
+    st.markdown("---")
+    st.header("Restoration Options")
+    enable_colorization = st.checkbox("Colorize Photo", value=True)
+    
+    era_guidelines = ""
+    if enable_colorization:
+        era_guidelines = st.text_input(
+            "Era/Style Guidelines (Optional)", 
+            placeholder="e.g. 1950s Kodachrome, Victorian, 80s vibrant"
+        )
+
     # Get images
     input_path = Path(input_path_str)
     image_files = []
@@ -56,15 +67,6 @@ with st.sidebar:
         if "selected_index" not in st.session_state:
             st.session_state.selected_index = 0
             
-        # Navigation
-        col_prev, col_next = st.columns(2)
-        with col_prev:
-            if st.button("⬅️ Previous", use_container_width=True):
-                st.session_state.selected_index = max(0, st.session_state.selected_index - 1)
-        with col_next:
-            if st.button("Next ➡️", use_container_width=True):
-                st.session_state.selected_index = min(len(image_files) - 1, st.session_state.selected_index + 1)
-
         # Dropdown selection (syncs with index)
         selected_file_name = st.selectbox(
             "Select Photo", 
@@ -87,10 +89,35 @@ if api_key and image_files:
     # Get currently selected file
     current_file_path = image_files[st.session_state.selected_index]
     
+    # Check for existing restored versions
+    output_dir = input_path / "restored"
+    output_dir.mkdir(exist_ok=True)
+    
+    existing_versions = []
+    for f in output_dir.iterdir():
+        if f.is_file() and f.name.startswith(f"restored_{current_file_path.name}"):
+            existing_versions.append(f)
+    existing_versions.sort(key=lambda x: x.stat().st_mtime, reverse=True)
+
     col1, col2 = st.columns(2)
     
     with col1:
-        st.subheader(f"Original: {current_file_path.name}")
+        # Header with Navigation
+        h_col, prev_col, next_col = st.columns([3, 1, 1], vertical_alignment="bottom")
+        
+        with h_col:
+            st.subheader(current_file_path.name)
+        
+        with prev_col:
+            if st.button("⬅️ Prev", key="nav_prev", use_container_width=True):
+                 st.session_state.selected_index = max(0, st.session_state.selected_index - 1)
+                 st.rerun()
+                 
+        with next_col:
+            if st.button("Next ➡️", key="nav_next", use_container_width=True):
+                 st.session_state.selected_index = min(len(image_files) - 1, st.session_state.selected_index + 1)
+                 st.rerun()
+
         try:
             image = Image.open(current_file_path)
             st.image(image, use_container_width=True)
@@ -98,79 +125,145 @@ if api_key and image_files:
             st.error(f"Error loading image: {e}")
 
     with col2:
-        st.subheader("Restored")
-        
-        # Unique key for button so it resets per image
-        restore_btn_key = f"restore_{current_file_path.name}"
-        
-        # Check if already restored (check output folder)
+        # Determine versions and selection first
         output_dir = input_path / "restored"
         output_dir.mkdir(exist_ok=True)
-        restored_path = output_dir / f"restored_{current_file_path.name}"
         
-        already_restored = restored_path.exists()
+        existing_versions = []
+        for f in output_dir.iterdir():
+            if f.is_file() and f.name.startswith(f"restored_{current_file_path.name}"):
+                existing_versions.append(f)
+        existing_versions.sort(key=lambda x: x.stat().st_mtime, reverse=True)
+
+        radio_key = f"ver_sel_{current_file_path.name}"
+        selected_ver_path = None
         
-        if already_restored:
+        # Header and Selector side-by-side
+        header_col, selector_col = st.columns([1, 1])
+        with header_col:
+            st.subheader("Restored")
+        
+        with selector_col:
+            if existing_versions:
+                version_names = [f.name for f in existing_versions]
+                try:
+                    current_idx = version_names.index(st.session_state.get(radio_key, version_names[0]))
+                except:
+                    current_idx = 0
+
+                st.selectbox(
+                    "Select Version",
+                    options=version_names,
+                    index=current_idx,
+                    key=radio_key,
+                    label_visibility="collapsed"
+                )
+                
+                # Get selected path for rendering below
+                current_choice = st.session_state.get(radio_key, version_names[0])
+                for f in existing_versions:
+                    if f.name == current_choice:
+                        selected_ver_path = f
+                        break
+        
+        # Render Selected Image
+        if selected_ver_path:
             try:
-                restored_image = Image.open(restored_path)
-                st.image(restored_image, use_container_width=True, caption="Loaded from disk")
-                if st.button("Re-run Restoration 🔄", key=restore_btn_key):
-                    already_restored = False # Force re-run logic below
-            except:
-                already_restored = False
+                ver_image = Image.open(selected_ver_path)
+                st.image(ver_image, use_container_width=True)
+                
+                # # Download button
+                # st.download_button(
+                #     label="Download This Version",
+                #     data=open(selected_ver_path, "rb").read(),
+                #     file_name=selected_ver_path.name,
+                #     mime="image/png",
+                #     key=f"dl_btn_{selected_ver_path.name}"
+                # )
+            except Exception as e:
+                st.error(f"Error loading {selected_ver_path.name}: {e}")
+        else:
+            st.info("No restored versions yet. Click the button below to generate one.")
 
-        if not already_restored:
-            if st.button("Restore Photo 🪄", key=restore_btn_key, type="primary"):
-                with st.spinner("Restoring... This usually takes 10-20 seconds."):
-                    try:
-                        # Load image bytes
-                        with open(current_file_path, "rb") as f:
-                            image_bytes = f.read()
+        # st.markdown("---")
+        
+        # Button to create NEW version
+        btn_key = f"create_new_{current_file_path.name}_{len(existing_versions)}"
+        
+        if st.button("Generate New Version 🪄", key=btn_key, type="primary"):
+            with st.spinner("Restoring..."):
+                try:
+                    # Load image bytes
+                    with open(current_file_path, "rb") as f:
+                        image_bytes = f.read()
+                    
+                    mime_type = Image.MIME.get(image.format, "image/png")
                         
-                        # Determine MIME type
-                        mime_type = Image.MIME.get(image.format, "image/png")
-                            
-                        prompt = (
-                            "Restore this old photo. "
-                            "1. Repair any damage, scratches, folds, or tears. "
-                            "2. Lightly colorize it to look natural but strictly maintain its original form and character. "
-                            "3. Do not change the composition or faces. "
-                            "Output ONLY the restored image."
-                        )
-                        
-                        response = client.models.generate_content(
-                            model=MODEL_NAME,
-                            contents=[
-                                prompt,
-                                types.Part.from_bytes(data=image_bytes, mime_type=mime_type)
-                            ],
-                        )
-                        
-                        # Extract image
-                        restored_data = None
-                        if response.candidates and response.candidates[0].content.parts:
-                            for part in response.candidates[0].content.parts:
-                                if part.inline_data:
-                                    restored_data = part.inline_data.data
-                                    break
-                        
-                        if restored_data:
-                            # Save to disk
-                            with open(restored_path, "wb") as f:
-                                f.write(restored_data)
-                            
-                            st.image(restored_data, use_container_width=True)
-                            st.success(f"✅ Saved to: {restored_path}")
-                            
-                            # Brief pause before reload to let user see success
-                            st.button("Click to Refresh View")
+                    prompt = (
+                        "Restore this old photo.\n"
+                        "1. Repair any damage, scratches, folds, or tears.\n"
+                    )
+                    
+                    if enable_colorization:
+                        prompt += "2. Colorize the photo to look natural."
+                        if era_guidelines:
+                            prompt += f" Follow these specific era/style guidelines: {era_guidelines}."
                         else:
-                            st.error("No image generated.")
-                            if response.text:
-                                st.warning(f"Response: {response.text}")
+                            prompt += " Maintain its original form and vintage character."
+                    else:
+                        prompt += "2. Keep the original black and white (or sepia) tone. Do NOT colorize."
 
-                    except Exception as e:
-                        st.error(f"Error: {e}")
+                    prompt += (
+                        "\n3. Do not change the composition or faces."
+                        "\nOutput ONLY the restored image."
+                    )
+                    
+                    response = client.models.generate_content(
+                        model=MODEL_NAME,
+                        contents=[
+                            prompt,
+                            types.Part.from_bytes(data=image_bytes, mime_type=mime_type)
+                        ],
+                        config=types.GenerateContentConfig(temperature=0.4)
+                    )
+                    
+                    # Extract image
+                    restored_data = None
+                    if response.candidates and response.candidates[0].content.parts:
+                        for part in response.candidates[0].content.parts:
+                            if part.inline_data:
+                                restored_data = part.inline_data.data
+                                break
+                    
+                    if restored_data:
+                        version_count = len(existing_versions) + 1
+                        new_filename = f"restored_{current_file_path.name}_v{version_count}.png"
+                        save_path = output_dir / new_filename
+                        with open(save_path, "wb") as f:
+                            f.write(restored_data)
+                        
+                        st.success(f"✅ Generated new version: {save_path.name}")
+                        
+                        # Show any text response from the model alongside the success
+                        try:
+                            if response.text:
+                                st.markdown("**Model Message:**")
+                                st.info(response.text)
+                        except:
+                            pass
+                            
+                        st.rerun()
+                    else:
+                        st.error("No image generated.")
+                        try:
+                            if response.text:
+                                st.markdown("### Model Text Response:")
+                                st.info(response.text)
+                        except Exception as e:
+                            st.warning("Could not retrieve text response from the model.")
+
+                except Exception as e:
+                    st.error(f"Error: {e}")
 
 elif not api_key:
     st.warning("Please enter your API Key in the sidebar.")
