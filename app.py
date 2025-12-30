@@ -81,7 +81,8 @@ with st.sidebar:
             st.rerun()
 
 def get_client(key):
-    return genai.Client(api_key=key, http_options={'api_version': 'v1alpha'})
+    # 'timeout': None disables the read timeout, allowing long processing times
+    return genai.Client(api_key=key, http_options={'api_version': 'v1alpha', 'timeout': None})
 
 if api_key and image_files:
     client = get_client(api_key)
@@ -125,30 +126,20 @@ if api_key and image_files:
             st.error(f"Error loading image: {e}")
 
     with col2:
-        # Determine versions and selection first
-        output_dir = input_path / "restored"
-        output_dir.mkdir(exist_ok=True)
-        
-        existing_versions = []
-        for f in output_dir.iterdir():
-            if f.is_file() and f.name.startswith(f"restored_{current_file_path.name}"):
-                existing_versions.append(f)
-        existing_versions.sort(key=lambda x: x.stat().st_mtime, reverse=True)
-
-        radio_key = f"ver_sel_{current_file_path.name}"
-        selected_ver_path = None
-        
         # Header and Selector side-by-side
         header_col, selector_col = st.columns([1, 1])
         with header_col:
             st.subheader("Restored")
+        
+        radio_key = f"ver_sel_{current_file_path.name}"
+        selected_ver_path = None
         
         with selector_col:
             if existing_versions:
                 version_names = [f.name for f in existing_versions]
                 try:
                     current_idx = version_names.index(st.session_state.get(radio_key, version_names[0]))
-                except:
+                except Exception:
                     current_idx = 0
 
                 st.selectbox(
@@ -193,17 +184,24 @@ if api_key and image_files:
         if st.button("Generate New Version 🪄", key=btn_key, type="primary"):
             with st.spinner("Restoring..."):
                 try:
-                    # Load image bytes
-                    with open(current_file_path, "rb") as f:
-                        image_bytes = f.read()
+                    # Load image to check size
+                    image_to_process = Image.open(current_file_path)
                     
-                    mime_type = Image.MIME.get(image.format, "image/png")
+                    # Resize if too large (helps with timeouts/errors)
+                    max_dimension = 3072
+                    if max(image_to_process.size) > max_dimension:
+                        st.warning(f"Image is large ({image_to_process.size}). Resizing to max {max_dimension}px for processing...")
+                        image_to_process.thumbnail((max_dimension, max_dimension))
+                    
+                    # Convert to bytes
+                    buf = io.BytesIO()
+                    fmt = image_to_process.format if image_to_process.format else "PNG"
+                    image_to_process.save(buf, format=fmt)
+                    image_bytes = buf.getvalue()
+                    mime_type = Image.MIME.get(fmt, "image/png")
                         
-                    prompt = (
-                        "Restore this old photo.\n"
-                        "1. Repair any damage, scratches, folds, or tears.\n"
-                    )
-                    
+                    # Build prompt
+                    prompt = "Restore this old photo.\n1. Repair any damage, scratches, folds, or tears.\n"
                     if enable_colorization:
                         prompt += "2. Colorize the photo to look natural."
                         if era_guidelines:
@@ -213,10 +211,7 @@ if api_key and image_files:
                     else:
                         prompt += "2. Keep the original black and white (or sepia) tone. Do NOT colorize."
 
-                    prompt += (
-                        "\n3. Do not change the composition or faces."
-                        "\nOutput ONLY the restored image."
-                    )
+                    prompt += "\n3. Do not change the composition or faces.\nOutput ONLY the restored image."
                     
                     response = client.models.generate_content(
                         model=MODEL_NAME,
@@ -243,15 +238,12 @@ if api_key and image_files:
                             f.write(restored_data)
                         
                         st.success(f"✅ Generated new version: {save_path.name}")
-                        
-                        # Show any text response from the model alongside the success
                         try:
                             if response.text:
                                 st.markdown("**Model Message:**")
                                 st.info(response.text)
-                        except:
+                        except Exception:
                             pass
-                            
                         st.rerun()
                     else:
                         st.error("No image generated.")
@@ -259,7 +251,7 @@ if api_key and image_files:
                             if response.text:
                                 st.markdown("### Model Text Response:")
                                 st.info(response.text)
-                        except Exception as e:
+                        except Exception:
                             st.warning("Could not retrieve text response from the model.")
 
                 except Exception as e:

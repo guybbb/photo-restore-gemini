@@ -5,8 +5,6 @@ from pathlib import Path
 from dotenv import load_dotenv
 from google import genai
 from google.genai import types
-from PIL import Image
-import io
 
 # Load environment variables
 load_dotenv()
@@ -99,7 +97,7 @@ def main():
     print(f"Found {len(images)} images. Using {MODEL_NAME}")
 
     for img_path in images:
-        success = restore_image(client, img_path, output_dir)
+        restore_image(client, img_path, output_dir)
         if args.sample:
             break
         time.sleep(10)
