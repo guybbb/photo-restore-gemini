@@ -41,13 +41,38 @@ with st.sidebar:
     st.markdown("---")
     st.header("Restoration Options")
     enable_colorization = st.checkbox("Colorize Photo", value=True)
+
+    output_resolution = st.selectbox(
+        "Output Resolution",
+        options=["1K", "2K", "4K"],
+        index=0,  # Default to 2K
+        help="Higher resolution = better quality but slower processing"
+    )
     
     era_guidelines = ""
     if enable_colorization:
         era_guidelines = st.text_input(
-            "Era/Style Guidelines (Optional)", 
+            "Era/Style Guidelines (Optional)",
             placeholder="e.g. 1950s Kodachrome, Victorian, 80s vibrant"
         )
+
+    st.markdown("---")
+    st.header("Custom Instructions")
+    custom_instructions = st.text_area(
+        "Additional Tweaking (Optional)",
+        placeholder="Be specific and descriptive. Examples:\n\n"
+                    "Color changes:\n"
+                    "• Change the dress to deep navy blue, keep the fabric texture\n"
+                    "• Make the car a vibrant cherry red\n"
+                    "• Change the wall to soft cream, preserve the lighting\n\n"
+                    "Lighting & mood:\n"
+                    "• Apply warm golden-hour lighting\n"
+                    "• Enhance contrast while keeping soft shadows\n\n"
+                    "Focus & depth:\n"
+                    "• Slightly blur the background for depth",
+        height=150,
+        help="Add your own instructions to fine-tune the restoration. Be descriptive about what to change and what to preserve."
+    )
 
     # Get images
     input_path = Path(input_path_str)
@@ -126,51 +151,74 @@ if api_key and image_files:
             st.error(f"Error loading image: {e}")
 
     with col2:
-        # Header and Selector side-by-side
-        header_col, selector_col = st.columns([1, 1])
-        with header_col:
-            st.subheader("Restored")
-        
-        radio_key = f"ver_sel_{current_file_path.name}"
-        selected_ver_path = None
-        
-        with selector_col:
+        # Session state for version index
+        ver_idx_key = f"ver_idx_{current_file_path.name}"
+        pending_key = f"pending_ver_{current_file_path.name}"
+
+        # Check if there's a pending selection (from new generation)
+        if pending_key in st.session_state:
+            pending_selection = st.session_state.pop(pending_key)
             if existing_versions:
                 version_names = [f.name for f in existing_versions]
-                try:
-                    current_idx = version_names.index(st.session_state.get(radio_key, version_names[0]))
-                except Exception:
-                    current_idx = 0
+                if pending_selection in version_names:
+                    st.session_state[ver_idx_key] = version_names.index(pending_selection)
+                else:
+                    st.session_state[ver_idx_key] = 0
 
-                st.selectbox(
-                    "Select Version",
-                    options=version_names,
-                    index=current_idx,
-                    key=radio_key,
-                    label_visibility="collapsed"
-                )
-                
-                # Get selected path for rendering below
-                current_choice = st.session_state.get(radio_key, version_names[0])
-                for f in existing_versions:
-                    if f.name == current_choice:
-                        selected_ver_path = f
+        if ver_idx_key not in st.session_state:
+            # Default to selected version if one exists
+            selected_idx = 0
+            if existing_versions:
+                for i, v in enumerate(existing_versions):
+                    if "-selected" in v.stem:
+                        selected_idx = i
                         break
-        
+            st.session_state[ver_idx_key] = selected_idx
+
+        # Ensure index is valid
+        if existing_versions:
+            st.session_state[ver_idx_key] = min(st.session_state[ver_idx_key], len(existing_versions) - 1)
+
+        selected_ver_path = existing_versions[st.session_state[ver_idx_key]] if existing_versions else None
+
+        # Header with Select button
+        if selected_ver_path:
+            is_selected = "-selected" in selected_ver_path.stem
+            header_col, select_col = st.columns([3, 1], vertical_alignment="bottom")
+            with header_col:
+                title = "Restored ⭐" if is_selected else "Restored"
+                st.subheader(title)
+            with select_col:
+                if not is_selected and len(existing_versions) > 1:
+                    if st.button("Select", key=f"select_btn_{selected_ver_path.name}"):
+                        new_name = selected_ver_path.stem + "-selected" + selected_ver_path.suffix
+                        new_path = selected_ver_path.parent / new_name
+                        selected_ver_path.rename(new_path)
+                        st.rerun()
+        else:
+            st.subheader("Restored")
+
         # Render Selected Image
         if selected_ver_path:
             try:
                 ver_image = Image.open(selected_ver_path)
                 st.image(ver_image, use_container_width=True)
-                
-                # # Download button
-                # st.download_button(
-                #     label="Download This Version",
-                #     data=open(selected_ver_path, "rb").read(),
-                #     file_name=selected_ver_path.name,
-                #     mime="image/png",
-                #     key=f"dl_btn_{selected_ver_path.name}"
-                # )
+
+                # Version navigation and filename
+                if len(existing_versions) > 1:
+                    prev_col, info_col, next_col = st.columns([1, 3, 1])
+                    with prev_col:
+                        if st.button("⬅️", key="ver_prev", use_container_width=True):
+                            st.session_state[ver_idx_key] = max(0, st.session_state[ver_idx_key] - 1)
+                            st.rerun()
+                    with info_col:
+                        st.caption(f"{selected_ver_path.name} ({st.session_state[ver_idx_key] + 1}/{len(existing_versions)})")
+                    with next_col:
+                        if st.button("➡️", key="ver_next", use_container_width=True):
+                            st.session_state[ver_idx_key] = min(len(existing_versions) - 1, st.session_state[ver_idx_key] + 1)
+                            st.rerun()
+                else:
+                    st.caption(selected_ver_path.name)
             except Exception as e:
                 st.error(f"Error loading {selected_ver_path.name}: {e}")
         else:
@@ -209,9 +257,15 @@ if api_key and image_files:
                         else:
                             prompt += " Maintain its original form and vintage character."
                     else:
-                        prompt += "2. Keep the original black and white (or sepia) tone. Do NOT colorize."
+                        prompt += "2. Keep the original color and tone"
 
-                    prompt += "\n3. Do not change the composition or faces.\nOutput ONLY the restored image."
+                    prompt += "\n3. Keep the composition or faces."
+                    prompt += "\n4. Keep the lightning and mood as original. Enhance contrast while keeping soft shadows."
+
+                    if custom_instructions:
+                        prompt += f"\n5. Additional instructions: {custom_instructions}"
+
+                    prompt += "\nOutput ONLY the restored image."
                     
                     response = client.models.generate_content(
                         model=MODEL_NAME,
@@ -219,7 +273,12 @@ if api_key and image_files:
                             prompt,
                             types.Part.from_bytes(data=image_bytes, mime_type=mime_type)
                         ],
-                        config=types.GenerateContentConfig(temperature=0.4)
+                        config=types.GenerateContentConfig(
+                            response_modalities=['IMAGE'],
+                            image_config=types.ImageConfig(
+                                image_size=output_resolution
+                            )
+                        )
                     )
                     
                     # Extract image
@@ -236,7 +295,10 @@ if api_key and image_files:
                         save_path = output_dir / new_filename
                         with open(save_path, "wb") as f:
                             f.write(restored_data)
-                        
+
+                        # Focus on the new version after rerun
+                        st.session_state[pending_key] = new_filename
+
                         st.success(f"✅ Generated new version: {save_path.name}")
                         try:
                             if response.text:
