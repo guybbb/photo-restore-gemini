@@ -105,7 +105,7 @@ with st.sidebar:
     
     st.markdown("---")
     st.header("Photo Source")
-    default_path = "/Users/guybalzam/Desktop/Mom Photos/ready"
+    default_path = ""
     if "input_path" not in st.session_state:
         st.session_state.input_path = default_path
         
