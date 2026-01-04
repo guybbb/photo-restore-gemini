@@ -1,6 +1,16 @@
 # Photo Restorer
 
-This tool uses the Gemini API (Nano Banana / Gemini 2.0 Flash Exp) to restore and lightly colorize old photos.
+A Streamlit-based photo restoration tool powered by Google's Gemini API. Mainly built for **Nano Banana** (Gemini image generation models).
+
+## What It Does
+
+- **Restores old photos** - Repairs damage, scratches, folds, and tears using AI
+- **Colorizes black & white photos** - Adds natural colors with optional era/style guidelines (e.g., "1950s Kodachrome")
+- **Crop & rotate** - Built-in image editing before restoration
+- **Multiple output resolutions** - Choose between 1K, 2K, or 4K output
+- **Version management** - Generate multiple restoration versions and select your favorite
+- **Super resolution export** - Optional 2x upscaling using FSRCNN for final export
+- **Custom instructions** - Fine-tune restorations with specific prompts (change colors, adjust lighting, etc.)
 
 ## Setup
 
@@ -8,7 +18,7 @@ This tool uses the Gemini API (Nano Banana / Gemini 2.0 Flash Exp) to restore an
     ```bash
     python3 -m venv venv
     source venv/bin/activate
-    pip install google-generativeai Pillow python-dotenv streamlit
+    pip install google-generativeai Pillow python-dotenv streamlit streamlit-image-cropper opencv-contrib-python
     ```
 
 ## Usage
@@ -22,6 +32,16 @@ This tool uses the Gemini API (Nano Banana / Gemini 2.0 Flash Exp) to restore an
 2.  Open the link shown in your browser (usually `http://localhost:8501`).
 3.  Enter your API Key in the sidebar.
 4.  Upload an image and click "Restore".
+
+### Super Resolution Model
+
+To use the Export "Super resolution (x2)" option, place the model file at:
+
+```
+models/FSRCNN_x2.pb
+```
+
+Note: the `cv2` module is provided by `opencv-contrib-python` (you do not install a separate `cv2` package).
 
 ### Option 2: Command Line
 
